@@ -1,0 +1,33 @@
+{
+  "aws": {
+    "us-east-1": "United States",
+    "us-east-2": "United States",
+    "us-west-1": "United States",
+    "us-west-2": "United States",
+    "eu-west-1": "Ireland",
+    "eu-west-2": "United Kingdom",
+    "eu-west-3": "France",
+    "eu-central-1": "Germany",
+    "eu-south-1": "Italy",
+    "eu-north-1": "Sweden",
+    "me-south-1": "Bahrain",
+    "me-central-1": "United Arab Emirates",
+    "af-south-1": "South Africa",
+    "ap-southeast-1": "Singapore",
+    "ap-northeast-1": "Japan"
+  },
+  "azure": {
+    "eastus": "United States",
+    "eastus2": "United States",
+    "westus": "United States",
+    "westeurope": "Netherlands",
+    "northeurope": "Ireland",
+    "francecentral": "France",
+    "germanywestcentral": "Germany",
+    "uksouth": "United Kingdom",
+    "uaenorth": "United Arab Emirates",
+    "southafricanorth": "South Africa"
+  },
+  "source": "AWS & Azure Official Regional Mapping Reference",
+  "last_updated": "2026-08-01"
+}

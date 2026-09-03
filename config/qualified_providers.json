@@ -1,0 +1,27 @@
+{
+  "description": "Registry of DGSSI-qualified cloud providers and regions under Decree 2.24.921 (Art. 6-10).",
+  "source": "DGSSI Cloud Qualification Portal (Mock / Pre-qualification Registry)",
+  "last_updated": "2026-08-01",
+  "qualified_providers": [
+    {
+      "cloud": "maroc_telecom_cloud",
+      "region": "casablanca-dc1",
+      "status": "QUALIFIED_LEVEL_2"
+    },
+    {
+      "cloud": "inwi_business_cloud",
+      "region": "rabat-dc2",
+      "status": "QUALIFIED_LEVEL_2"
+    },
+    {
+      "cloud": "orange_maroc_cloud",
+      "region": "technopolis-rabat",
+      "status": "QUALIFIED_LEVEL_1"
+    },
+    {
+      "cloud": "atlas_cloud",
+      "region": "morocco-central",
+      "status": "QUALIFIED_LEVEL_2"
+    }
+  ]
+}

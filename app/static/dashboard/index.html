@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sovereignty Compliance Dashboard</title>
+<style>
+  :root { --bg: #0f1117; --panel: #171a23; --border: #2a2e3a; --text: #e4e6eb;
+          --muted: #8b909c; --allow: #2e9e5b; --deny: #c94b4b; --review: #d3a13c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-top: 0; }
+  input { width: 100%; padding: 8px 10px; margin-bottom: 10px; background: #0f1117; border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+  button { cursor: pointer; border: none; border-radius: 4px; padding: 6px 12px; font-size: 13px; }
+  .btn-primary { background: #3a6ff7; color: white; }
+  .btn-approve { background: var(--allow); color: white; }
+  .btn-reject { background: var(--deny); color: white; }
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.ALLOWED, .badge.ALLOW { background: rgba(46,158,91,0.15); color: var(--allow); }
+  .badge.DENIED, .badge.DENY { background: rgba(201,75,75,0.15); color: var(--deny); }
+  .badge.REVIEW, .badge.REVIEW_PENDING { background: rgba(211,161,60,0.15); color: var(--review); }
+  .muted { color: var(--muted); font-size: 12px; }
+  .error { color: var(--deny); font-size: 13px; margin-top: 6px; }
+  #app-view { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Sovereignty Compliance Dashboard</h1>
+  <div id="user-info" class="muted"></div>
+</header>
+
+<main>
+  <div id="login-view" class="panel" style="max-width: 320px; margin: 60px auto;">
+    <h2>Sign in</h2>
+    <input id="email" type="email" placeholder="email" autocomplete="username">
+    <input id="password" type="password" placeholder="password" autocomplete="current-password">
+    <button class="btn-primary" style="width: 100%;" onclick="login()">Sign in</button>
+    <div id="login-error" class="error"></div>
+  </div>
+
+  <div id="app-view">
+    <div class="panel">
+      <h2>Pending Reviews</h2>
+      <div id="reviews-list"><span class="muted">Loading...</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Recent Decisions</h2>
+      <div id="decisions-list"><span class="muted">Loading...</span></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ============================================================
+// Token storage: sessionStorage, not localStorage. Rationale --
+// this is a real, deliberate tradeoff, not an arbitrary choice:
+//   - sessionStorage clears when the tab closes, shrinking the
+//     window an XSS-stolen token remains useful for, compared to
+//     localStorage which persists indefinitely.
+//   - Neither is immune to XSS (a script running on this page can
+//     always read either). The FULLY XSS-proof option is an
+//     httpOnly cookie, which JS cannot read at all -- but that
+//     shifts the API to needing CSRF protection instead, since
+//     browsers auto-attach cookies to every request to that origin.
+//   - For a same-origin, low-traffic internal tool like this, the
+//     XSS-vs-CSRF tradeoff favors sessionStorage's simplicity; a
+//     public-facing product handling real end-user sessions should
+//     lean toward httpOnly cookies + CSRF tokens instead.
+// ============================================================
+
+let state = { token: null, companyId: null, roles: [] };
+
+function saveSession(token, companyId, roles) {
+  state = { token, companyId, roles };
+  sessionStorage.setItem("sovereignty_session", JSON.stringify(state));
+}
+
+function loadSession() {
+  const raw = sessionStorage.getItem("sovereignty_session");
+  if (raw) state = JSON.parse(raw);
+  return state.token !== null;
+}
+
+function clearSession() {
+  sessionStorage.removeItem("sovereignty_session");
+  state = { token: null, companyId: null, roles: [] };
+}
+
+// escapeHtml: every piece of server-returned text (entity names,
+// reasons, etc.) is company-controlled data, not free-form public
+// input -- but rendering ANY dynamic string via innerHTML without
+// escaping is a stored-XSS risk by habit, not just in this specific
+// case. Escaping unconditionally costs nothing and removes the need
+// to reason about which fields are "safe enough" to skip.
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+async function apiFetch(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (state.token) headers["Authorization"] = `Bearer ${state.token}`;
+
+  const response = await fetch(path, { ...options, headers });
+  if (response.status === 401) {
+    clearSession();
+    render();
+    throw new Error("Session expired -- please sign in again.");
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail?.message || body.detail || `Request failed (${response.status})`);
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+async function login() {
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+  const errorEl = document.getElementById("login-error");
+  errorEl.textContent = "";
+
+  try {
+    const data = await apiFetch("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    // JWT payload is base64, readable client-side without the
+    // secret (see notes elsewhere in this project on JWTs being
+    // signed, not encrypted) -- decoded here purely for company_id,
+    // since /auth/login doesn't separately return it.
+    const payload = JSON.parse(atob(data.access_token.split(".")[1]));
+    saveSession(data.access_token, payload.company_id, data.roles || []);
+    render();
+  } catch (err) {
+    errorEl.textContent = err.message;
+  }
+}
+
+function logout() {
+  clearSession();
+  render();
+}
+
+async function loadReviews() {
+  const el = document.getElementById("reviews-list");
+  try {
+    const reviews = await apiFetch(`/companies/${state.companyId}/reviews`);
+    if (reviews.length === 0) {
+      el.innerHTML = `<span class="muted">No pending reviews.</span>`;
+      return;
+    }
+    const canReview = state.roles.includes("compliance_reviewer") || state.roles.includes("admin");
+    el.innerHTML = reviews.map(r => `
+      <div class="row">
+        <div>
+          <div>${escapeHtml(r.entity_name)} <span class="muted">(${escapeHtml(r.entity_type)})</span></div>
+          <div class="muted">${escapeHtml(r.reason)} -- expires ${new Date(r.expires_at).toLocaleString()}</div>
+        </div>
+        ${canReview ? `
+          <div>
+            <button class="btn-approve" onclick="resolveReview('${r.authorization_request_id}', true)">Approve</button>
+            <button class="btn-reject" onclick="resolveReview('${r.authorization_request_id}', false)">Reject</button>
+          </div>` : `<span class="muted">Read-only</span>`}
+      </div>
+    `).join("");
+  } catch (err) {
+    el.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+async function resolveReview(authorizationRequestId, approve) {
+  try {
+    await apiFetch(`/reviews/${authorizationRequestId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ approve }),
+    });
+    await loadReviews();
+    await loadDecisions();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function loadDecisions() {
+  const el = document.getElementById("decisions-list");
+  try {
+    const decisions = await apiFetch(`/companies/${state.companyId}/decisions`);
+    if (decisions.length === 0) {
+      el.innerHTML = `<span class="muted">No decisions yet.</span>`;
+      return;
+    }
+    el.innerHTML = decisions.map(d => `
+      <div class="row">
+        <div>
+          <div>${escapeHtml(d.entity_name)} <span class="muted">-> ${escapeHtml(d.destination_country || "n/a")}</span></div>
+          <div class="muted">${new Date(d.decided_at).toLocaleString()} -- ${escapeHtml(d.model_name)}</div>
+        </div>
+        <span class="badge ${d.decision}">${d.decision}</span>
+      </div>
+    `).join("");
+  } catch (err) {
+    el.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+function render() {
+  const loggedIn = state.token !== null;
+  document.getElementById("login-view").style.display = loggedIn ? "none" : "block";
+  document.getElementById("app-view").style.display = loggedIn ? "block" : "none";
+  document.getElementById("user-info").innerHTML = loggedIn
+    ? `${escapeHtml(state.roles.join(", "))} <button onclick="logout()" style="margin-left:10px;">Sign out</button>`
+    : "";
+  if (loggedIn) {
+    loadReviews();
+    loadDecisions();
+  }
+}
+
+loadSession();
+render();
+</script>
+</body>
+</html>
